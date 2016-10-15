@@ -1,0 +1,29 @@
+{
+  "author": "elmopitt",
+  "name": "tny-id3",
+  "version": "1.0.0",
+  "description": "Small ID3 parser/writer",
+  "license": "MIT",
+  "main": "index.js",
+  "scripts": {
+    "test": "jasmine"
+  },
+  "repository": {
+    "type": "git",
+    "url": "elmopitt/tny-id3"
+  },
+  "bugs": {
+    "url": "https://github.com/elmopitt/tny-id3/issues"
+  },
+  "keywords": [
+    "id3",
+    "tag",
+    "read",
+    "write",
+    "parse"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "jasmine": "^2.5.2"
+  }
+}
