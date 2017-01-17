@@ -5,7 +5,7 @@
  * @enum {string}
  */
 const ID3FrameId = {
-  ACCOMPANIMENT: 'TPE2',
+  ACCOMPANIMENT: 'TPE2',  // also, album artist
   ALBUM: 'TALB',
   ARTIST: 'TPE1',
   ATTACHED_PICTURE: 'APIC',
@@ -24,6 +24,10 @@ const ID3FrameId = {
   YEAR: 'TYER',
 };
 
+/**
+ * Returns the v2.3 equivent for the given v2.2 frame ID.
+ * @type {function(string): ?ID3FrameId}
+ */
 const fromV2ID = function(id) {
   switch(id) {
     case 'TT1': return ID3FrameId.GROUP_TITLE;

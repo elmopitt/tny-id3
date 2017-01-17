@@ -130,47 +130,113 @@ class ID3Container {
    * Returns the frame for the given ID, or {@code null} if no such frame could
    * be found.
    * @param {!ID3FrameId} id
+   * @param {boolean=} opt_createIfMissing
    * @return {?ID3Frame}
    */
-  getFrame(id) {
+  getFrame(id, opt_createIfMissing) {
+    if (opt_createIfMissing && !this.framesById_.has(id)) {
+      this.framesById_.set(id, new ID3Frame(id));
+    }
     return this.framesById_.get(id) || null;
   }
 
   /**
    * Writes the current tag data.
-   * @param {string|!stream.ReadStream} container
+   * @param {function(*|undefined):void} callback
+   * @param {string|!stream.Writable=} opt_container
    */
-  write(container) {
-    const containerType = typeof container;
-    const useExistingPath = !container ||
-        (containerType == 'string' && container == this.readStream_.path);
+  write(callback, opt_container) {
+    const containerType = typeof opt_container;
+    const useExistingPath = !opt_container ||
+        (containerType == 'string' && opt_container == this.readStream_.path);
     let totalFrameSize = 0;
     let didFramesChange = false;
     for (const frame of this.framesById_.values()) {
       didFramesChange = didFramesChange || frame.isChanged();
-      totalFrameSize += (HEADER_SIZE + frame.getData().length);
+
+      // Only write a frame if it has some data.
+      if (frame.getData() && frame.getData().length) {
+        totalFrameSize += (HEADER_SIZE + frame.getData().length);
+      }
     }
     if (useExistingPath && !didFramesChange) {
       // No frame changes, so nothing to do.
+      callback(null);
       return;
     }
-    if (!useExistingPath) {
-      throw Error('Writing to a completely new file isn\'t supported yet');
-    } else if (totalFrameSize > this.originalTagSize_) {
-      // We can't write in-place; create a new temp file for the results.
-      throw Error('Writing to a file without enough pre-existing tag space ' +
-          'is not yet supported.');
-    } else {
-      const writeStream = fs.createWriteStream({
-        flags: 'r+',
-      });
-      const newPaddingSize = this.originalTagSize_ - totalFrameSize;
-      // writeHeader()
-      for (const frame of this.framesById_.values()) {
-        // writeFrame()
+    let readStream = null;
+    let writeStream = null;
+    let newPaddingSize = 512;
+    try {
+      if (!useExistingPath) {
+        writeStream = (containerType == 'string') ?
+            fs.createWriteStream(
+                opt_container,
+                {
+                  flags: 'w+',
+                }) :
+            opt_container;
+        // Start reading from the original file, but skipping the old tags.
+        readStream = fs.createReadStream(
+            this.readStream_.path,
+            {
+              start: this.originalTagSize_
+            });
+      } else if (totalFrameSize > this.originalTagSize_) {
+        // We can't write in-place; create a new temp file for the results.
+        throw Error('Writing to a file without enough pre-existing tag space ' +
+            'is not yet supported:' + opt_container);
+      } else {
+        // We're writing the tags in place, so the new padding size is
+        // determined by the difference of the new tags and the original ones.
+        newPaddingSize = this.originalTagSize_ - totalFrameSize;
+        writeStream = fs.createWriteStream(
+          this.readStream_.path,
+          {
+            flags: 'r+',
+          });
       }
-      // write newPaddingSize of zeros.
+      this.writeHeader_(writeStream, totalFrameSize);
+
+      for (const frame of this.framesById_.values()) {
+        frame.writeFrame(writeStream);
+      }
+
+      const paddingBuffer = new Buffer(1);
+      paddingBuffer[0] = 0;
+      for (let i = 0; i < newPaddingSize; i++) {
+        writeStream.write(paddingBuffer);
+      }
+      if (!readStream) {
+        // We're done already!
+        writeStream.close();
+        callback(null);
+        return;
+      }
+    } catch (err) {
+      console.error('Exception writing ID3 tags; ' + opt_container +':' + err);
+      callback(err);
     }
+
+    readStream.on('error', (err) => {
+      console.error(
+          'Error reading file on ID3 write: ' + opt_container +':' + err);
+      callback(err);
+      readStream.close();
+      writeStream.close();
+    });
+    writeStream.on('error', (err) => {
+      console.error(
+          'Error writing file on ID3 write: ' + opt_container +':' + err);
+      callback(err);
+      readStream.close();
+      writeStream.close();
+    });
+    writeStream.on('finish', () => {
+      callback(null);
+    });
+
+    readStream.pipe(writeStream);
   }
 
   /**
@@ -218,6 +284,9 @@ class ID3Container {
     } catch (err) {
       console.error(err);
       this.error_ = err;
+      if (this.onDoneCallback_) {
+        this.onDoneCallback_(this.error_);
+      }
     }
   }
 
@@ -239,7 +308,7 @@ class ID3Container {
 
     this.version_ = header[3];
     if (this.version_ != 2 && this.version_ != 3) {
-      throw Error('Only ID3 versions 2.2 and 2.3 are supported.');
+      throw Error('Only ID3 versions 2.2 and 2.3 are supported');
     }
     this.revision_ = header[4];
     this.flags_ = header[5];
@@ -268,6 +337,30 @@ class ID3Container {
     this.tagBytesRemaining_ = this.originalTagSize_;
 
     return true;
+  }
+
+  /**
+   * Writes the header to the given output stream.
+   * @param {!stream.Writable} writeStream
+   * @param {number} totalSize
+   * @private
+   */
+  writeHeader_(writeStream, totalSize) {
+    const buffer = new Buffer(HEADER_SIZE);
+    buffer.write('ID3');
+
+    // Although different versions of ID3 may be read, v2.3.0 is written
+    // unconditionally.
+    buffer[3] = 3;
+    buffer[4] = 0;
+
+    buffer[5] = this.flags_;
+    let remainingSize = totalSize;
+    for (let i = HEADER_SIZE - 1; i >= 6; i--) {
+      buffer[i] = remainingSize % 128;
+      remainingSize = remainingSize >> 7;
+    }
+    writeStream.write(buffer);
   }
 
   /**
@@ -312,6 +405,9 @@ class ID3Container {
     if (this.currentFrame_.isEmpty()) {
       this.paddingSize_ += HEADER_SIZE;
     } else {
+      // if (this.framesById_.has(this.currentFrame_.getId())) {
+      //   console.log('found duplicate frame: ' + this.currentFrame_.getId());
+      // }
       this.framesById_.set(this.currentFrame_.getId(), this.currentFrame_);
     }
     this.currentFrame_ = null;

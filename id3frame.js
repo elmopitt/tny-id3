@@ -40,9 +40,12 @@ class ID3Frame {
     this.data_ = null;
 
     /**
+     * Whether this frame has changed since it was originally read. Since frames
+     * are always represent as v2.3, any other version of frame is considered
+     * changed immediately.
      * @private {boolean}
      */
-    this.isChanged_ = false;
+    this.isChanged_ = (this.originalVersion_ != 3);
 
     if (!isTag) {
       if (this.originalVersion_ == 2) {
@@ -108,17 +111,18 @@ class ID3Frame {
   /**
    * Sets the data for this frame, excluding the header.
    * @param {!Buffer} buffer
-   * @param {boolean=} opt_isOriginalData
+   * @param {boolean=} isOriginalData
    */
-  setData(buffer, opt_isOriginalData) {
-    if (opt_isOriginalData && buffer.length != this.originalSize_) {
+  setData(buffer, isOriginalData = false) {
+    if (isOriginalData && buffer.length != this.originalSize_) {
       throw Error('Buffer size does not match original data size.');
     }
-    this.data_ = buffer;
-    this.isChanged_ = !opt_isOriginalData;
-    if (this.id_ != ID3FrameId.ATTACHED_PICTURE) {
-      console.log('Tag ' + this.id_ +': ' + buffer.toString());
+    if (isOriginalData && (this.originalVerion_ == 2)) {
+      // TODO(jpittenger): Update v2 data to v3. Attached pictures, for example,
+      // are different.
     }
+    this.data_ = buffer;
+    this.isChanged_ = !isOriginalData;
   }
 
   /**
@@ -163,6 +167,24 @@ class ID3Frame {
   }
 
   /**
+   * @return {number}
+   */
+  getPictureType() {
+    if (!this.isAttachedPictureFrame()) {
+      throw Error('Pictures are only supported for attached picture ' +
+          'frames.');
+    }
+    console.log('picture frame size: ' + this.data_.length);
+    console.log('text encoding: ' + this.data_[0]);
+    for (let i = 1; i < this.data_.length; i++) {
+      if (!this.data_[i]) {
+        console.log('mime type: ' + this.data_.toString(NON_UNICODE_ENCODING, 1, i+1));
+        return this.data_[i + 1];
+      }
+    }
+  }
+
+  /**
    * Sets the given string as data for this frame. This is only supported for
    * text information frames.
    * @param {string} value
@@ -172,15 +194,76 @@ class ID3Frame {
       throw Error('String values are only supported for text information ' +
           'frames.');
     }
+    let nonPrefixedBuffer;
+    let encoding = 0;
     const nonUnicodeBuffer = Buffer.from(value, NON_UNICODE_ENCODING);
     if (nonUnicodeBuffer.toString(NON_UNICODE_ENCODING) == value) {
       // If we were able to roundtrip the value properly, then non-unicode is
       // good enough.
-      this.data_ = nonUnicodeBuffer;
+      nonPrefixedBuffer = nonUnicodeBuffer;
     } else {
-      this.data_ = Buffer.from(value, 'utf16le');
+      nonPrefixedBuffer = Buffer.from(value, 'utf16le');
+      encoding = 1;
     }
+    this.data_ = Buffer.allocUnsafeSlow(nonPrefixedBuffer.length + 1);
+    this.data_.writeUInt8(encoding, 0);
+    nonPrefixedBuffer.copy(this.data_, 1);
     this.isChanged_ = true;
+  }
+
+  /**
+   * Sets the given picture data for this frame. This is only supported for
+   * attached picture frames.
+   * @param {!ID3PictureType} pictureType
+   * @param {!Buffer} imageBuffer
+   * @param {string=} opt_mimeType
+   * @param {string=} opt_description
+   */
+  setPicture(pictureType, imageBuffer, opt_mimeType, opt_description) {
+    if (!this.isAttachedPictureFrame()) {
+      throw Error('Pictures are only supported for attached picture ' +
+          'frames.');
+    }
+
+    let encoding = 0;
+    let descriptionBuffer =
+        opt_description && Buffer.from(opt_description, NON_UNICODE_ENCODING);
+    if (opt_description &&
+        descriptionBuffer.toString(NON_UNICODE_ENCODING) != opt_description) {
+      descriptionBuffer = Buffer.from(opt_description, 'utf16le');
+      encoding = 1;
+    }
+    const dataSize = imageBuffer.length +
+        1 + // Text encoding
+        (opt_mimeType ? opt_mimeType.length : 0) +
+        1 + // Mime-type termination
+        1 + // Picture type
+        (opt_description ? descriptionBuffer.length : 0) +
+        (encoding ? 2 : 1);  // Description termination;
+
+    let totalSoFar = 0;
+    this.data_ = Buffer.allocUnsafeSlow(dataSize);
+    this.data_.writeUInt8(encoding, totalSoFar);
+    totalSoFar += 1;
+    if (opt_mimeType) {
+      this.data_.write(opt_mimeType, totalSoFar);
+      totalSoFar += opt_mimeType.length;
+    }
+    this.data_.writeUInt8(0, totalSoFar);
+    totalSoFar += 1;
+    this.data_.writeUInt8(pictureType, totalSoFar);
+    totalSoFar += 1;
+    if (opt_description) {
+      descriptionBuffer.copy(this.data_, totalSoFar);
+      totalSoFar += descriptionBuffer.length;
+    }
+    this.data_.writeUInt8(0, totalSoFar);
+    totalSoFar += 1;
+    if (encoding) {
+      this.data_.writeUInt8(0, totalSoFar);
+      totalSoFar += 1;
+    }
+    imageBuffer.copy(this.data_, totalSoFar);
   }
 
   /**
@@ -190,6 +273,15 @@ class ID3Frame {
    */
   isTextInformationFrame() {
     return this.id_[0] == 'T';
+  }
+
+  /**
+   * Returns whether this is frame's data is an attached picture.
+   * @return {boolean}
+   * @see http://id3.org/id3v2.3.0#Attached_picture
+   */
+  isAttachedPictureFrame() {
+    return this.id_ == ID3FrameId.ATTACHED_PICTURE;
   }
 
   /**
@@ -205,6 +297,23 @@ class ID3Frame {
    */
   isChanged() {
     return this.isChanged_;
+  }
+
+  /**
+   * Writes the header to the given output stream.
+   * @param {!stream.Writable} writeStream
+   */
+  writeFrame(writeStream) {
+    if (!this.data_ || !this.data_.length) {
+      // Frames with no data are stripped.
+      return;
+    }
+    const buffer = new Buffer(HEADER_SIZE);
+    buffer.write(this.id_, 'ascii');
+    buffer.writeInt32BE(this.data_.length, 4);
+    buffer.writeInt16BE(this.flags_, 8);
+    writeStream.write(buffer);
+    writeStream.write(this.data_);
   }
 }
 
