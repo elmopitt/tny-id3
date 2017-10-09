@@ -2,10 +2,26 @@ const ID3Container = require('../id3container.js');
 const ID3FrameID = require('../id3frameid.js');
 const ID3PictureType = require('../id3picturetype.js');
 const fs = require('fs');
+const os = require('os');
+const { sep } = require('path');
+
+const tmpDir = os.tmpdir();
 
 describe('ID3Container', function() {
+  let testOutput;
+
+  beforeEach(() => {
+    // Create a temporary directory for writing.
+    testOutput = fs.mkdtempSync(`${tmpDir}${sep}tny-id3-`);
+  });
+  afterEach(() => {
+    // Remove the temporary directory for written files. If it's not empty,
+    // then something went wrong.
+    fs.rmdirSync(testOutput);
+  });
+
   it('should load a file with no existing tags', function(done) {
-    var test = new ID3Container('./test/test_none.mp3');
+    var test = new ID3Container(`.${sep}test${sep}test_none.mp3`);
     expect(test).not.toBe(null);
 
     test.onDone((err) => {
@@ -16,7 +32,7 @@ describe('ID3Container', function() {
   });
 
   it('should load v2.2 tags as written by iTunes', function(done) {
-    var test = new ID3Container('./test/test_itunes.mp3');
+    var test = new ID3Container(`.${sep}test${sep}test_itunes.mp3`);
     expect(test).not.toBe(null);
 
     test.onDone((err) => {
@@ -38,7 +54,7 @@ describe('ID3Container', function() {
   });
 
   it('should write string tags', function(done) {
-    var test = new ID3Container('./test/test_itunes.mp3');
+    var test = new ID3Container(`.${sep}test${sep}test_itunes.mp3`);
     expect(test).not.toBe(null);
 
     test.onDone((err) => {
@@ -55,7 +71,9 @@ describe('ID3Container', function() {
   });
 
   it('should write new tags to a new file', function(done) {
-    var test = new ID3Container('./test/test_itunes.mp3');
+    expect(fs.existsSync(testOutput)).toBeTruthy();
+  
+    var test = new ID3Container(`.${sep}test${sep}test_itunes.mp3`);
     expect(test).not.toBe(null);
 
     test.onDone((err) => {
@@ -64,24 +82,25 @@ describe('ID3Container', function() {
         done();
         return;
       }
-      const newPath = './test/test_itunes_rewrite.mp3';
+      const newPath = `${testOutput}${sep}test_itunes_rewrite.mp3`;
       test.getFrame(ID3FrameID.TITLE).setString('some new title');
-      test.write((err) => {
-        expect(err).toBe(null);
-        if (err) {
-          done();
-          return;
-        }
-        var rewriteTest = new ID3Container(newPath);
-        rewriteTest.onDone((err) => {
-          expect(err).toBe(null);
-          expect(rewriteTest.getFrame(ID3FrameID.TITLE).getString())
-              .toBe('some new title');
-          fs.unlinkSync(newPath);
-          done();
-        })
-      },
-      newPath);
+      test.write(
+          (err) => {
+            expect(err).toBe(null);
+            if (err) {
+              done();
+              return;
+            }
+            var rewriteTest = new ID3Container(newPath);
+            rewriteTest.onDone((err) => {
+              expect(err).toBe(null);
+              expect(rewriteTest.getFrame(ID3FrameID.TITLE).getString())
+                  .toBe('some new title');
+              fs.unlinkSync(newPath);
+              done();
+            })
+          },
+          newPath);
     });
   });
 });

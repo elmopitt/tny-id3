@@ -96,12 +96,7 @@ class ID3Container {
       throw Error('Unsupported ID3 container type: ' + containerType);
     }
 
-    this.readStream_.on('end', () => {
-      this.isDone_ = true;
-      this.onReadable_();
-    });
-
-    this.readStream_.on('readable', () => {
+   this.readStream_.on('readable', () => {
       this.onReadable_();
     });
   }
@@ -243,7 +238,7 @@ class ID3Container {
    * @private
    */
   onReadable_() {
-    if (this.error_) {
+    if (this.error_ || this.isDone_) {
       return;
     }
     try {
