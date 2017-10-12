@@ -5,11 +5,17 @@
     "tasks": [
         {
             "type": "npm",
-            "script": "test",
+            "script": "build",
             "group": {
                 "kind": "build",
                 "isDefault": true
             }
         },
+        {
+            "label": "Run tests",
+            "type": "npm",
+            "script": "test",
+            "group": "test"
+        }
     ]
 }

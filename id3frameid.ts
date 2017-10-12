@@ -1,34 +1,30 @@
-'use strict';
-
 /**
  * An enumeration of known ID3 field IDs.
- * @enum {string}
  */
-const ID3FrameId = {
-  ACCOMPANIMENT: 'TPE2',  // also, album artist
-  ALBUM: 'TALB',
-  ARTIST: 'TPE1',
-  ATTACHED_PICTURE: 'APIC',
-  COMMENTS: 'COMM',
-  COMPOSER: 'TCOM',
-  CONDUCTOR: 'TPE3',
-  CONTENT_TYPE: 'TCON',
-  DATE: 'TDAT',
-  DISC: 'TOPS',
-  GROUP_TITLE: 'TIT1',
-  LYRICIST: 'TEXT',
-  IS_COMPILATION: 'TCMP',
-  SUB_TITLE: 'TIT3',
-  TITLE: 'TIT2',
-  TRACK: 'TRCK',
-  YEAR: 'TYER',
-};
+export enum ID3FrameId {
+  ACCOMPANIMENT = 'TPE2',  // also, album artist
+  ALBUM = 'TALB',
+  ARTIST = 'TPE1',
+  ATTACHED_PICTURE = 'APIC',
+  COMMENTS = 'COMM',
+  COMPOSER = 'TCOM',
+  CONDUCTOR = 'TPE3',
+  CONTENT_TYPE = 'TCON',
+  DATE = 'TDAT',
+  DISC = 'TOPS',
+  GROUP_TITLE = 'TIT1',
+  LYRICIST = 'TEXT',
+  IS_COMPILATION = 'TCMP',
+  SUB_TITLE = 'TIT3',
+  TITLE = 'TIT2',
+  TRACK = 'TRCK',
+  YEAR = 'TYER',
+}
 
 /**
  * Returns the v2.3 equivent for the given v2.2 frame ID.
- * @type {function(string): ?ID3FrameId}
  */
-const fromV2ID = function(id) {
+export function fromV2ID(id: string): ID3FrameId|null {
   switch(id) {
     case 'TT1': return ID3FrameId.GROUP_TITLE;
     case 'TT2': return ID3FrameId.TITLE;
@@ -55,6 +51,3 @@ const fromV2ID = function(id) {
     default: return null;
   }
 }
-
-module.exports = ID3FrameId;
-module.exports.fromV2ID = fromV2ID;
